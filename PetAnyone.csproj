@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\tModLoader.targets" />
+  <PropertyGroup>
+    <BuildMod>false</BuildMod>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <Target Name="CopyToPuppyModLib" AfterTargets="Build" Condition="Exists('..\PuppyMod\lib')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="..\PuppyMod\lib" />
+  </Target>
+</Project>
