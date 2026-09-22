@@ -35,8 +35,8 @@ public static class PetService
     /// <summary>Default reach arm angle, matching vanilla's petting pose.</summary>
     public const float PetAngleVanilla = 0.37f;
 
-    /// <summary>Gore type 331 is the full bright heart used by the Love Potion.</summary>
-    private const int LoveHeartGore = 331;
+    /// <summary>Gore type of the full bright heart, used by the Love Potion. New in v2.</summary>
+    public const int DefaultHeartGoreType = 331;
 
     /// <summary>Terraria tile size in pixels.</summary>
     private const float TilePixels = 16f;
@@ -202,7 +202,7 @@ public static class PetService
         if (!target.IsActive)
             return;
 
-        PlayPetHeartSynced(target);
+        PlayHeartOpportunity(patter, target, PetEventSource.Synced);
         ApplyPetCore(patter, target, bypassCooldown: true);
     }
 
@@ -320,8 +320,9 @@ public static class PetService
     }
 
     /// <summary>
-    /// Spawns at most one heart per target every <see cref="PetHeartIntervalTicks"/>, no matter how
-    /// often the hold refresh or a network broadcast asks for one. Sound is owned by the consumer.
+    /// Throttled heart opportunity for one target. Client only. Raises <see cref="PetHeartEvent"/>
+    /// with a Manual source and then spawns the built in heart when no handler set
+    /// <see cref="PetHeartEvent.Handled"/>.
     /// </summary>
     public static void PlayPetHeartSynced(PetTarget target)
     {
@@ -330,8 +331,7 @@ public static class PetService
 
     /// <summary>
     /// The single heart opportunity for one target: client and target guards, the shared throttle,
-    /// then the built in spawn. The patter and source are accepted here so the v2 heart hook can
-    /// report who applied and which path triggered it.
+    /// then a <see cref="PetHeartEvent"/> and, when no handler took over, the built in spawn.
     /// </summary>
     private static void PlayHeartOpportunity(Player? patter, PetTarget target, PetEventSource source)
     {
@@ -344,14 +344,25 @@ public static class PetService
             return;
 
         LastHeartTick[key] = now;
-        SpawnPetHeart(target);
+
+        var evt = new PetHeartEvent(new PetContext(patter, target), source);
+        PetEvents.RaisePetHeart(evt);
+        if (!evt.Handled && TrySpawnDefaultHeart(target))
+            evt.DefaultSpawned = true;
     }
 
-    /// <summary>Spawns one Love Potion style full heart that gently floats up over the target.</summary>
-    private static void SpawnPetHeart(PetTarget target)
+    /// <summary>
+    /// Spawns one Love Potion style full heart above the target immediately, ignoring the shared
+    /// throttle. Client only. Returns false on a dedicated server, when the target does not
+    /// resolve, or when the gore could not be spawned.
+    /// </summary>
+    public static bool TrySpawnDefaultHeart(PetTarget target)
     {
+        if (Main.dedServ)
+            return false;
+
         if (!target.TryGetEntity(out Entity? entity) || entity is null)
-            return;
+            return false;
 
         Vector2 position = entity.Center
             + new Vector2(0f, -entity.Hitbox.Height * 0.6f)
@@ -361,17 +372,18 @@ public static class PetService
             entity.GetSource_FromThis(),
             position,
             Vector2.Zero,
-            LoveHeartGore,
+            DefaultHeartGoreType,
             Main.rand.NextFloat(0.55f, 0.85f));
 
         if (index < 0 || index >= Main.gore.Length)
-            return;
+            return false;
 
         Gore heart = Main.gore[index];
         heart.sticky = false;
         heart.velocity = new Vector2(Main.rand.NextFloat(-0.25f, 0.25f), Main.rand.NextFloat(-0.9f, -0.5f));
         heart.rotation = 0f;
         heart.timeLeft = 70;
+        return true;
     }
 
     /// <summary>
