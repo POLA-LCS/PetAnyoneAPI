@@ -9,22 +9,17 @@ namespace PetAnyone;
 /// by index, so it stays valid to copy, store in timers and compare without keeping an entity
 /// reference alive.
 /// </summary>
-public readonly struct PetTarget : IEquatable<PetTarget>
+public readonly struct PetTarget(PetTargetKind kind, int index) : IEquatable<PetTarget>
 {
     /// <summary>Empty target, used as the "nothing" value.</summary>
     public static readonly PetTarget None = new(PetTargetKind.Player, -1);
 
-    public PetTarget(PetTargetKind kind, int index)
-    {
-        Kind = kind;
-        Index = index;
-    }
 
     /// <summary>Whether this handle points at a player or an NPC.</summary>
-    public PetTargetKind Kind { get; }
+    public PetTargetKind Kind { get; } = kind;
 
     /// <summary>Player index (<c>whoAmI</c>) or NPC index.</summary>
-    public int Index { get; }
+    public int Index { get; } = index;
 
     public bool IsPlayer => Kind == PetTargetKind.Player;
 
