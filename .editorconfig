@@ -1,6 +1,6 @@
 root = true
 
-[*.cs]
+[Petting/**.cs]
 # The API intentionally uses one flat PetAnyone namespace for every file,
 # including the files grouped in the Petting folder.
 dotnet_style_namespace_match_folder = false
