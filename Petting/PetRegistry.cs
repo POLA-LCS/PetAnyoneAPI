@@ -5,47 +5,140 @@ using Terraria.ModLoader;
 namespace PetAnyone;
 
 /// <summary>
-/// Central registry of everything that may be petted. Players are pettable by default; NPCs must
-/// be registered here, either per NPC type or through a predicate rule. Consumer mods register
-/// their own entries and their own "held item allows petting" rules. Every registration remembers
-/// its owning <see cref="Mod"/> and is pruned lazily once that mod is no longer loaded, so
-/// unloading a mod cannot leave dangling handlers behind.
+/// Owner scoped registration table. NPC type registrations and NPC rules are layered per owner and
+/// resolved by priority then recency, player veto rules and requirements stay ANDed, and held item
+/// rules stay ORed. Every consumer predicate is exception isolated, and entries are pruned lazily
+/// once their owning <see cref="Mod"/> is no longer loaded, so unloading a mod cannot leave
+/// dangling handlers behind.
 /// </summary>
 public static class PetRegistry
 {
-    private static readonly Dictionary<int, OwnedNpcDefinition> npcDefinitions = new();
+    private static readonly Dictionary<int, List<OwnedNpcDefinition>> npcDefinitions = new();
     private static readonly List<OwnedNpcRule> npcRules = new();
     private static readonly List<OwnedPlayerRule> playerRules = new();
     private static readonly List<OwnedPlayerRule> playerRequirements = new();
     private static readonly List<OwnedItemRule> petHandItems = new();
 
-    /// <summary>Registers a pettable NPC type. Registration alone makes the NPC pettable.</summary>
+    /// <summary>Monotonic registration counter used as the recency tiebreak within one priority.</summary>
+    private static long sequence;
+
+    /// <summary>Registers a pettable NPC type with <see cref="PetPriority.Normal"/>. Registration alone makes the NPC pettable.</summary>
     public static void RegisterNpc(Mod owner, int npcType, PetNpcDefinition? definition = null)
     {
-        if (owner is null)
-            throw new ArgumentNullException(nameof(owner));
-        npcDefinitions[npcType] = new OwnedNpcDefinition(owner, definition ?? PetNpcDefinition.Default);
-    }
-
-    /// <summary>Removes a per-type registration if it belongs to <paramref name="owner"/>.</summary>
-    public static bool UnregisterNpc(Mod owner, int npcType)
-    {
-        return npcDefinitions.TryGetValue(npcType, out OwnedNpcDefinition existing)
-            && existing.Owner == owner
-            && npcDefinitions.Remove(npcType);
+        RegisterNpc(owner, npcType, definition, PetPriority.Normal);
     }
 
     /// <summary>
-    /// Registers a predicate rule that marks matching NPCs as pettable. Rules take priority over
-    /// per-type registrations, and the most recently registered matching rule wins.
+    /// Registers a pettable NPC type at the given <paramref name="priority"/>. The type is stored as
+    /// an owner scoped layer, and the first live layer in priority then recency order wins. When the
+    /// same owner registers the same type again, the definition is replaced in place while the
+    /// existing priority and sequence are preserved, so changing priority requires
+    /// <see cref="UnregisterNpc"/> followed by a new registration. Registering a type that a layer
+    /// owned by a different mod already shadows at a strictly higher priority keeps the new layer
+    /// and logs one informational conflict naming both owners.
+    /// </summary>
+    public static void RegisterNpc(Mod owner, int npcType, PetNpcDefinition? definition, PetPriority priority)
+    {
+        if (owner is null)
+            throw new ArgumentNullException(nameof(owner));
+
+        PetNpcDefinition resolved = definition ?? PetNpcDefinition.Default;
+        if (!npcDefinitions.TryGetValue(npcType, out List<OwnedNpcDefinition>? layers))
+        {
+            layers = new List<OwnedNpcDefinition>();
+            npcDefinitions[npcType] = layers;
+        }
+
+        for (int i = 0; i < layers.Count; i++)
+        {
+            OwnedNpcDefinition existing = layers[i];
+            if (existing.Owner == owner)
+            {
+                layers[i] = existing with { Definition = resolved };
+                return;
+            }
+        }
+
+        // Shadowing is reported once per registration. Stale layers are skipped here and pruned by
+        // the next lookup, so a registration never destroys another mod's entries.
+        OwnedNpcDefinition? shadowedBy = null;
+        for (int i = layers.Count - 1; i >= 0; i--)
+        {
+            OwnedNpcDefinition existing = layers[i];
+            if (!IsOwnerLoaded(existing.Owner))
+                continue;
+            if (existing.Owner != owner && existing.Priority < priority
+                && (shadowedBy is null || existing.Priority < shadowedBy.Value.Priority))
+            {
+                shadowedBy = existing;
+            }
+        }
+
+        if (shadowedBy is OwnedNpcDefinition shadow)
+        {
+            PetLog.Info(owner,
+                $"PetRegistry: NPC type {npcType} from '{owner.Name}' is shadowed by '{shadow.Owner.Name}' "
+                + $"at priority {shadow.Priority} ({(int)shadow.Priority}). Register at priority {shadow.Priority} "
+                + "or a numerically lower value to win, and unregister before changing priority.");
+        }
+
+        int insertAt = 0;
+        while (insertAt < layers.Count && layers[insertAt].Priority < priority)
+            insertAt++;
+
+        layers.Insert(insertAt, new OwnedNpcDefinition(owner, resolved, priority, ++sequence));
+    }
+
+    /// <summary>Removes every layer owned by <paramref name="owner"/> for this NPC type and returns whether anything was removed.</summary>
+    public static bool UnregisterNpc(Mod owner, int npcType)
+    {
+        if (!npcDefinitions.TryGetValue(npcType, out List<OwnedNpcDefinition>? layers))
+            return false;
+
+        bool removed = false;
+        for (int i = layers.Count - 1; i >= 0; i--)
+        {
+            if (layers[i].Owner == owner)
+            {
+                layers.RemoveAt(i);
+                removed = true;
+            }
+        }
+
+        if (layers.Count == 0)
+            npcDefinitions.Remove(npcType);
+
+        return removed;
+    }
+
+    /// <summary>
+    /// Registers a predicate rule that marks matching NPCs as pettable with
+    /// <see cref="PetPriority.Normal"/>. Rules are consulted before per-type registrations, and the
+    /// first live match in priority then recency order wins.
     /// </summary>
     public static void RegisterNpcRule(Mod owner, Func<NPC, bool> predicate, PetNpcDefinition? definition = null)
+    {
+        RegisterNpcRule(owner, predicate, definition, PetPriority.Normal);
+    }
+
+    /// <summary>
+    /// Registers a predicate rule at the given <paramref name="priority"/>. Lower values are
+    /// consulted first, and equal priorities go to the most recent registration.
+    /// </summary>
+    public static void RegisterNpcRule(Mod owner, Func<NPC, bool> predicate, PetNpcDefinition? definition, PetPriority priority)
     {
         if (owner is null)
             throw new ArgumentNullException(nameof(owner));
         if (predicate is null)
             throw new ArgumentNullException(nameof(predicate));
-        npcRules.Add(new OwnedNpcRule(owner, predicate, definition ?? PetNpcDefinition.Default));
+
+        OwnedNpcRule rule = new(owner, predicate, definition ?? PetNpcDefinition.Default, priority, ++sequence);
+
+        int index = 0;
+        while (index < npcRules.Count && npcRules[index].Priority < priority)
+            index++;
+
+        npcRules.Insert(index, rule);
     }
 
     /// <summary>Removes a predicate rule belonging to <paramref name="owner"/>.</summary>
@@ -63,39 +156,52 @@ public static class PetRegistry
         return false;
     }
 
-    /// <summary>Whether the NPC matches a registered rule or type; also outputs its definition.</summary>
+    /// <summary>
+    /// Whether the NPC matches a registered rule or type; also outputs its definition. Rules are
+    /// resolved before type layers, and definitions never merge across entries.
+    /// </summary>
     public static bool TryGetNpcDefinition(NPC npc, [NotNullWhen(true)] out PetNpcDefinition? definition)
     {
         definition = null;
         if (npc is null)
             return false;
 
-        // Rules win over type registrations so per-instance conditions can override a default.
-        for (int i = npcRules.Count - 1; i >= 0; i--)
+        // Rules win over type registrations, ordered by priority ascending then recency descending.
+        for (int i = 0; i < npcRules.Count; i++)
         {
             OwnedNpcRule rule = npcRules[i];
             if (!IsOwnerLoaded(rule.Owner))
             {
                 npcRules.RemoveAt(i);
+                i--;
                 continue;
             }
-            if (rule.Predicate(npc))
+            if (SafeEvaluate(rule.Owner, rule.Predicate, npc, "PetRegistry.NpcRule"))
             {
                 definition = rule.Definition;
                 return true;
             }
         }
 
-        if (!npcDefinitions.TryGetValue(npc.type, out OwnedNpcDefinition owned))
+        if (!npcDefinitions.TryGetValue(npc.type, out List<OwnedNpcDefinition>? layers))
             return false;
-        if (!IsOwnerLoaded(owned.Owner))
+
+        for (int i = 0; i < layers.Count; i++)
         {
-            npcDefinitions.Remove(npc.type);
-            return false;
+            OwnedNpcDefinition entry = layers[i];
+            if (!IsOwnerLoaded(entry.Owner))
+            {
+                layers.RemoveAt(i);
+                i--;
+                continue;
+            }
+            definition = entry.Definition;
+            return true;
         }
 
-        definition = owned.Definition;
-        return true;
+        if (layers.Count == 0)
+            npcDefinitions.Remove(npc.type);
+        return false;
     }
 
     /// <summary>Whether the NPC may be petted at all (registered).</summary>
@@ -103,7 +209,8 @@ public static class PetRegistry
 
     /// <summary>
     /// Registers a rule that can veto petting a player. Players are pettable by default, so a rule
-    /// only matters when it returns false; use this to exclude special players.
+    /// only matters when it returns false; use this to exclude special players. Player lists keep
+    /// v1 registration order, and a rule whose predicate throws vetoes.
     /// </summary>
     public static void RegisterPlayerRule(Mod owner, Func<Player, bool> isPettable)
     {
@@ -132,7 +239,9 @@ public static class PetRegistry
     /// <summary>
     /// Registers an allow-list requirement: a player is pettable only when every requirement
     /// returns true. With no requirements, all players are pettable by default. This is additive
-    /// with the veto rules in <see cref="RegisterPlayerRule"/>; both must pass.
+    /// with the veto rules in <see cref="RegisterPlayerRule"/>; both must pass. Requirements are
+    /// checked first, a requirement whose predicate throws fails, and evaluation order stays v1
+    /// registration order.
     /// </summary>
     public static void RegisterPlayerRequirement(Mod owner, Func<Player, bool> predicate)
     {
@@ -173,7 +282,7 @@ public static class PetRegistry
                 i--;
                 continue;
             }
-            if (!rule.Predicate(player))
+            if (!SafeEvaluate(rule.Owner, rule.Predicate, player, "PetRegistry.PlayerRequirement"))
                 return false;
         }
 
@@ -186,7 +295,7 @@ public static class PetRegistry
                 i--;
                 continue;
             }
-            if (!rule.Predicate(player))
+            if (!SafeEvaluate(rule.Owner, rule.Predicate, player, "PetRegistry.PlayerRule"))
                 return false;
         }
         return true;
@@ -194,7 +303,8 @@ public static class PetRegistry
 
     /// <summary>
     /// Registers an "item allows petting" rule. The empty hand always allows petting; a held item
-    /// only does when a rule says so (for example a clicker registered by a consumer mod).
+    /// only does when a rule says so (for example a clicker registered by a consumer mod). Item
+    /// rules are ORed in v1 registration order, and a rule whose predicate throws does not allow.
     /// </summary>
     public static void RegisterPetHandItem(Mod owner, Func<Item, bool> allowsPetting)
     {
@@ -235,7 +345,7 @@ public static class PetRegistry
                 i--;
                 continue;
             }
-            if (rule.Predicate(item))
+            if (SafeEvaluate(rule.Owner, rule.Predicate, item, "PetRegistry.PetHandItem"))
                 return true;
         }
         return false;
@@ -252,7 +362,49 @@ public static class PetRegistry
         return ModLoader.TryGetMod(owner.Name, out Mod loaded) && ReferenceEquals(loaded, owner);
     }
 
-    /// <summary>Drops every registration; call this when the consuming mod unloads.</summary>
+    /// <summary>Removes every registration owned by <paramref name="owner"/> across every list and returns the number removed.</summary>
+    public static int ClearOwner(Mod owner)
+    {
+        if (owner is null)
+            throw new ArgumentNullException(nameof(owner));
+
+        int removed = 0;
+        List<int>? emptyTypes = null;
+
+        foreach (KeyValuePair<int, List<OwnedNpcDefinition>> pair in npcDefinitions)
+        {
+            List<OwnedNpcDefinition> layers = pair.Value;
+            for (int i = layers.Count - 1; i >= 0; i--)
+            {
+                if (layers[i].Owner == owner)
+                {
+                    layers.RemoveAt(i);
+                    removed++;
+                }
+            }
+
+            if (layers.Count == 0)
+            {
+                emptyTypes ??= new List<int>();
+                emptyTypes.Add(pair.Key);
+            }
+        }
+
+        if (emptyTypes is not null)
+        {
+            foreach (int npcType in emptyTypes)
+                npcDefinitions.Remove(npcType);
+        }
+
+        removed += RemoveOwned(npcRules, owner, static entry => entry.Owner);
+        removed += RemoveOwned(playerRules, owner, static entry => entry.Owner);
+        removed += RemoveOwned(playerRequirements, owner, static entry => entry.Owner);
+        removed += RemoveOwned(petHandItems, owner, static entry => entry.Owner);
+
+        return removed;
+    }
+
+    /// <summary>Drops every registration and resets the logger throttle; call this when the consuming mod unloads.</summary>
     public static void Clear()
     {
         npcDefinitions.Clear();
@@ -260,13 +412,47 @@ public static class PetRegistry
         playerRules.Clear();
         playerRequirements.Clear();
         petHandItems.Clear();
+        PetLog.Clear();
     }
 
-    private readonly record struct OwnedNpcDefinition(Mod Owner, PetNpcDefinition Definition);
+    private readonly record struct OwnedNpcDefinition(Mod Owner, PetNpcDefinition Definition, PetPriority Priority, long Sequence);
 
-    private readonly record struct OwnedNpcRule(Mod Owner, Func<NPC, bool> Predicate, PetNpcDefinition Definition);
+    private readonly record struct OwnedNpcRule(Mod Owner, Func<NPC, bool> Predicate, PetNpcDefinition Definition, PetPriority Priority, long Sequence);
 
     private readonly record struct OwnedPlayerRule(Mod Owner, Func<Player, bool> Predicate);
 
     private readonly record struct OwnedItemRule(Mod Owner, Func<Item, bool> Predicate);
+
+    /// <summary>
+    /// Runs one consumer predicate, logging and treating the result as false when it throws. A false
+    /// result reads as "does not match" for an NPC rule, "vetoes" for a player rule, "fails" for a
+    /// player requirement, and "does not allow" for an item rule.
+    /// </summary>
+    private static bool SafeEvaluate<T>(Mod owner, Func<T, bool> predicate, T value, string context)
+    {
+        try
+        {
+            return predicate(value);
+        }
+        catch (Exception exception)
+        {
+            PetLog.Error(owner, context, exception);
+            return false;
+        }
+    }
+
+    /// <summary>Removes every entry owned by <paramref name="owner"/> and returns the number removed.</summary>
+    private static int RemoveOwned<T>(List<T> list, Mod owner, Func<T, Mod> ownerOf)
+    {
+        int removed = 0;
+        for (int i = list.Count - 1; i >= 0; i--)
+        {
+            if (ownerOf(list[i]) == owner)
+            {
+                list.RemoveAt(i);
+                removed++;
+            }
+        }
+        return removed;
+    }
 }
