@@ -26,6 +26,9 @@ public static class PetService
     /// <summary>How often a hold refreshes the pet while right-click is held.</summary>
     public const int PetRefreshTicks = 10;
 
+    /// <summary>Ticks without a refresh before a session auto ends. New in v2.</summary>
+    public const int PetHoldTimeoutTicks = PetRefreshTicks * 2;
+
     /// <summary>Reach arm angle used for morphed targets, overridden by a consumer mod.</summary>
     public const float PetAngleMorphed = 0.27f;
 
@@ -38,9 +41,18 @@ public static class PetService
     /// <summary>Terraria tile size in pixels.</summary>
     private const float TilePixels = 16f;
 
+    /// <summary>Ticks between sweeps of stale cooldown and heart entries.</summary>
+    private const int TickSweepInterval = 300;
+
     private static readonly Dictionary<(PetTargetKind Kind, int Index), int> LastHeartTick = new();
     private static readonly Dictionary<int, int> PlayerLastPetTick = new();
     private static readonly Dictionary<int, int> NpcLastPetTick = new();
+
+    /// <summary>Open sessions keyed by patter index, target kind, and target index. Indices only.</summary>
+    private static readonly Dictionary<SessionKey, SessionState> Sessions = new();
+
+    /// <summary>Game update tick of the last <see cref="Tick"/> pump. Extra calls in one tick are no-ops.</summary>
+    private static long LastProcessedTick = long.MinValue;
 
     /// <summary>
     /// Whether this player's right-click is free for petting: the empty hand always works, and
@@ -140,9 +152,31 @@ public static class PetService
     }
 
     /// <summary>
-    /// Core application: per-target cooldown bookkeeping and the OnPetStart/OnPetHold event. The
-    /// consuming mod decides when a tap or hold applies and owns all networking around it.
+    /// The recommended apply entry point. A local tap runs the full gate: target, registry, range,
+    /// the <c>CanPet</c> event, and the per target cooldown. A local hold, a synced replay, and a
+    /// manual application check the target only. Every path records the session, dispatches
+    /// <see cref="PetStartEvent"/> or <see cref="PetHoldEvent"/>, and plays a heart opportunity.
     /// </summary>
+    /// <param name="patter">The player applying the pet, or null when the caller has no player.</param>
+    /// <param name="target">The player or NPC being petted.</param>
+    /// <param name="mode">Tap or hold intent. The first application of a session opens with this mode.</param>
+    /// <param name="source">Local, Synced, or Manual. Only <see cref="PetEventSource.Local"/> runs the full gate.</param>
+    public static PetApplyResult TryApplyPet(
+        Player? patter,
+        PetTarget target,
+        PetApplyMode mode,
+        PetEventSource source = PetEventSource.Local)
+    {
+        ExpireStaleSessions();
+
+        if (source == PetEventSource.Local && mode == PetApplyMode.Tap)
+            return ApplyLocalTap(patter, target, source);
+
+        return ApplySessionEvent(patter, target, mode, source);
+    }
+
+    /// <summary>Deprecated. Kept for v1 binaries. Prefer <see cref="TryApplyPet"/>.</summary>
+    [Obsolete("Use PetService.TryApplyPet(patter, target, mode) instead.")]
     public static bool ApplyPetCore(Player? patter, PetTarget target, bool bypassCooldown)
     {
         if (!target.IsActive)
@@ -161,10 +195,8 @@ public static class PetService
         return true;
     }
 
-    /// <summary>
-    /// Applies a synced pet on a client: shared visuals and core bookkeeping. The consuming mod
-    /// adds its own sound and reach animation around the call.
-    /// </summary>
+    /// <summary>Deprecated. Kept for v1 binaries. Prefer <see cref="TryApplyPet"/> with <see cref="PetEventSource.Synced"/>.</summary>
+    [Obsolete("Use PetService.TryApplyPet(patter, target, mode, PetEventSource.Synced) instead.")]
     public static void HandleSyncedPet(Player? patter, PetTarget target)
     {
         if (!target.IsActive)
@@ -172,6 +204,79 @@ public static class PetService
 
         PlayPetHeartSynced(target);
         ApplyPetCore(patter, target, bypassCooldown: true);
+    }
+
+    /// <summary>
+    /// Closes the active session for the patter and target pair, raises <see cref="PetEndEvent"/>
+    /// with the given reason and source, and returns whether a session was closed. Prefer this over
+    /// raising end manually so session state stays consistent.
+    /// </summary>
+    public static bool EndPet(
+        Player? patter,
+        PetTarget target,
+        PetEndReason reason = PetEndReason.Released,
+        PetEventSource source = PetEventSource.Local)
+    {
+        ExpireStaleSessions();
+        return CloseSession(KeyFor(patter, target), reason, source);
+    }
+
+    /// <summary>
+    /// True when any active session targets this entity. Two patters on one target produce two
+    /// sessions, so this answers whether anyone is petting the target. Side effect free.
+    /// </summary>
+    public static bool IsPetActive(PetTarget target)
+    {
+        foreach (SessionKey key in Sessions.Keys)
+        {
+            if (key.Kind == target.Kind && key.Index == target.Index)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>True when an active session exists for this exact patter and target pair. Side effect free.</summary>
+    public static bool IsPetActive(Player? patter, PetTarget target)
+    {
+        return Sessions.ContainsKey(KeyFor(patter, target));
+    }
+
+    /// <summary>
+    /// Copies the active session for the target when one exists. When two patters hold sessions on
+    /// the same target, the most recently refreshed session wins, ties broken by the newest start.
+    /// Use <see cref="IsPetActive(Player, PetTarget)"/> for one specific pair. Side effect free.
+    /// </summary>
+    public static bool TryGetActiveSession(PetTarget target, out PetSessionInfo session)
+    {
+        session = default;
+        SessionState? best = null;
+        SessionKey bestKey = default;
+
+        foreach (KeyValuePair<SessionKey, SessionState> pair in Sessions)
+        {
+            if (pair.Key.Kind != target.Kind || pair.Key.Index != target.Index)
+                continue;
+
+            if (best is null
+                || pair.Value.LastRefreshTick > best.LastRefreshTick
+                || (pair.Value.LastRefreshTick == best.LastRefreshTick && pair.Value.StartedTick > best.StartedTick))
+            {
+                best = pair.Value;
+                bestKey = pair.Key;
+            }
+        }
+
+        if (best is null)
+            return false;
+
+        session = new PetSessionInfo(
+            new PetTarget(bestKey.Kind, bestKey.Index),
+            ResolvePatter(bestKey.PatterIndex),
+            best.Source,
+            best.StartedTick,
+            best.LastRefreshTick);
+        return true;
     }
 
     /// <summary>Angle used for the reach arm; consumers can override it per target.</summary>
@@ -220,6 +325,16 @@ public static class PetService
     /// </summary>
     public static void PlayPetHeartSynced(PetTarget target)
     {
+        PlayHeartOpportunity(null, target, PetEventSource.Manual);
+    }
+
+    /// <summary>
+    /// The single heart opportunity for one target: client and target guards, the shared throttle,
+    /// then the built in spawn. The patter and source are accepted here so the v2 heart hook can
+    /// report who applied and which path triggered it.
+    /// </summary>
+    private static void PlayHeartOpportunity(Player? patter, PetTarget target, PetEventSource source)
+    {
         if (Main.dedServ || !target.IsActive)
             return;
 
@@ -259,12 +374,252 @@ public static class PetService
         heart.timeLeft = 70;
     }
 
-    /// <summary>Drops all per-target tick and heart state; call this when the consuming mod unloads.</summary>
-    public static void Clear()
+    /// <summary>
+    /// Per tick pump: expires sessions that missed their refresh window and, every 300 ticks,
+    /// sweeps cooldown and heart entries whose entity index went stale or inactive. Safe to call
+    /// repeatedly inside one game tick; only the first call does work.
+    /// </summary>
+    public static void Tick()
     {
+        long now = Main.GameUpdateCount;
+        if (LastProcessedTick == now)
+            return;
+        LastProcessedTick = now;
+
+        ExpireStaleSessions();
+
+        if (now % TickSweepInterval == 0)
+            SweepStaleTickState();
+    }
+
+    /// <summary>
+    /// Clears sessions, cooldown ticks, heart throttle ticks, and tick guards without touching
+    /// registrations or event handlers. Call this from a world unload hook. New in v2.
+    /// </summary>
+    public static void ResetWorldState()
+    {
+        Sessions.Clear();
         LastHeartTick.Clear();
         PlayerLastPetTick.Clear();
         NpcLastPetTick.Clear();
+        LastProcessedTick = long.MinValue;
+    }
+
+    /// <summary>Drops all session, cooldown, and heart state; call this when the consuming mod unloads.</summary>
+    public static void Clear()
+    {
+        ResetWorldState();
+    }
+
+    // Private session plumbing. Sessions key on indices only and never hold entity references.
+
+    private static PetApplyResult ApplyLocalTap(Player? patter, PetTarget target, PetEventSource source)
+    {
+        if (!target.IsAlive)
+            return PetApplyResult.Reject(PetApplyCode.RejectedTarget);
+
+        if (!PassesRegistryGate(patter, target))
+            return PetApplyResult.Reject(PetApplyCode.RejectedRegistry);
+
+        // A null patter has no reach, so it cannot pass the range gate.
+        if (patter is null || !WithinPixels(patter.Center, target.Center, PetRangeTiles * TilePixels))
+            return PetApplyResult.Reject(PetApplyCode.RejectedRange);
+
+        var context = new PetContext(patter, target);
+        if (!PetEvents.RaiseCanPet(context, PetEventSource.Local))
+            return PetApplyResult.Reject(PetApplyCode.RejectedCancelled);
+
+        long now = Main.GameUpdateCount;
+        int nowTick = (int)now;
+        if (nowTick - GetTargetLastPetTick(target) < PetCooldownTicks)
+            return PetApplyResult.Reject(PetApplyCode.RejectedCooldown);
+
+        SetTargetLastPetTick(target, nowTick);
+
+        SessionKey key = KeyFor(patter, target);
+        CloseSessionWithStoredSource(key, PetEndReason.Replaced);
+
+        Sessions[key] = new SessionState(source, now, now);
+        PetEvents.RaisePetStart(new PetStartEvent(context, source, PetApplyMode.Tap));
+
+        PlayHeartOpportunity(patter, target, source);
+        return PetApplyResult.Success;
+    }
+
+    private static PetApplyResult ApplySessionEvent(Player? patter, PetTarget target, PetApplyMode mode, PetEventSource source)
+    {
+        SessionKey key = KeyFor(patter, target);
+        if (!target.IsAlive)
+        {
+            CloseSessionWithStoredSource(key, PetEndReason.TargetLost);
+            return PetApplyResult.Reject(PetApplyCode.RejectedTarget);
+        }
+
+        long now = Main.GameUpdateCount;
+        var context = new PetContext(patter, target);
+
+        if (Sessions.TryGetValue(key, out SessionState? session))
+        {
+            session.LastRefreshTick = now;
+            PetEvents.RaisePetHold(new PetHoldEvent(context, source));
+        }
+        else
+        {
+            Sessions[key] = new SessionState(source, now, now);
+            PetEvents.RaisePetStart(new PetStartEvent(context, source, mode));
+        }
+
+        PlayHeartOpportunity(patter, target, source);
+        return PetApplyResult.Success;
+    }
+
+    private static bool PassesRegistryGate(Player? patter, PetTarget target)
+    {
+        if (target.IsPlayer)
+        {
+            if (!target.TryGetPlayer(out Player? player) || player.dead)
+                return false;
+            if (patter is not null && player.whoAmI == patter.whoAmI)
+                return false;
+            return PetRegistry.IsPlayerPettable(player);
+        }
+
+        if (!target.TryGetNpc(out NPC? npc) || !npc.active || npc.life <= 0)
+            return false;
+
+        return PetRegistry.IsNpcPettable(npc);
+    }
+
+    private static SessionKey KeyFor(Player? patter, PetTarget target)
+    {
+        return new SessionKey(patter?.whoAmI ?? -1, target.Kind, target.Index);
+    }
+
+    private static Player? ResolvePatter(int patterIndex)
+    {
+        if ((uint)patterIndex >= (uint)Main.player.Length)
+            return null;
+        return Main.player[patterIndex];
+    }
+
+    private static bool CloseSession(SessionKey key, PetEndReason reason, PetEventSource source)
+    {
+        if (!Sessions.Remove(key))
+            return false;
+
+        RaiseSessionEnd(key, reason, source);
+        return true;
+    }
+
+    /// <summary>Closes a session using the source it was opened with, per the session contract.</summary>
+    private static bool CloseSessionWithStoredSource(SessionKey key, PetEndReason reason)
+    {
+        if (!Sessions.TryGetValue(key, out SessionState? session))
+            return false;
+
+        return CloseSession(key, reason, session.Source);
+    }
+
+    private static void RaiseSessionEnd(SessionKey key, PetEndReason reason, PetEventSource source)
+    {
+        var target = new PetTarget(key.Kind, key.Index);
+        var context = new PetContext(ResolvePatter(key.PatterIndex), target);
+        PetEvents.RaisePetEnd(new PetEndEvent(context, source, reason));
+    }
+
+    private static void ExpireStaleSessions()
+    {
+        if (Sessions.Count == 0)
+            return;
+
+        long now = Main.GameUpdateCount;
+        var expired = new List<KeyValuePair<SessionKey, SessionState>>();
+        foreach (KeyValuePair<SessionKey, SessionState> pair in Sessions)
+        {
+            if (now - pair.Value.LastRefreshTick <= PetHoldTimeoutTicks)
+                continue;
+            expired.Add(pair);
+        }
+
+        for (int i = 0; i < expired.Count; i++)
+        {
+            KeyValuePair<SessionKey, SessionState> pair = expired[i];
+            Sessions.Remove(pair.Key);
+            PetEndReason reason = new PetTarget(pair.Key.Kind, pair.Key.Index).IsActive
+                ? PetEndReason.Timeout
+                : PetEndReason.TargetLost;
+            RaiseSessionEnd(pair.Key, reason, pair.Value.Source);
+        }
+    }
+
+    private static void SweepStaleTickState()
+    {
+        var stalePlayerIndices = new List<int>();
+        foreach (int index in PlayerLastPetTick.Keys)
+        {
+            if (!IsPlayerIndexActive(index))
+                stalePlayerIndices.Add(index);
+        }
+
+        for (int i = 0; i < stalePlayerIndices.Count; i++)
+            PlayerLastPetTick.Remove(stalePlayerIndices[i]);
+
+        var staleNpcIndices = new List<int>();
+        foreach (int index in NpcLastPetTick.Keys)
+        {
+            if (!IsNpcIndexActive(index))
+                staleNpcIndices.Add(index);
+        }
+
+        for (int i = 0; i < staleNpcIndices.Count; i++)
+            NpcLastPetTick.Remove(staleNpcIndices[i]);
+
+        var staleHeartKeys = new List<(PetTargetKind Kind, int Index)>();
+        foreach ((PetTargetKind kind, int index) in LastHeartTick.Keys)
+        {
+            bool active = kind == PetTargetKind.Player ? IsPlayerIndexActive(index) : IsNpcIndexActive(index);
+            if (!active)
+                staleHeartKeys.Add((kind, index));
+        }
+
+        for (int i = 0; i < staleHeartKeys.Count; i++)
+            LastHeartTick.Remove(staleHeartKeys[i]);
+    }
+
+    private static bool IsPlayerIndexActive(int index)
+    {
+        if ((uint)index >= (uint)Main.player.Length)
+            return false;
+        Player? player = Main.player[index];
+        return player is not null && player.active;
+    }
+
+    private static bool IsNpcIndexActive(int index)
+    {
+        if ((uint)index >= (uint)Main.npc.Length)
+            return false;
+        NPC? npc = Main.npc[index];
+        return npc is not null && npc.active;
+    }
+
+    /// <summary>Index-only key for one pet session: patter index, target kind, and target index.</summary>
+    private readonly record struct SessionKey(int PatterIndex, PetTargetKind Kind, int Index);
+
+    /// <summary>Per session bookkeeping: opening source and tick stamps only, never entity references.</summary>
+    private sealed class SessionState
+    {
+        internal SessionState(PetEventSource source, long startedTick, long lastRefreshTick)
+        {
+            Source = source;
+            StartedTick = startedTick;
+            LastRefreshTick = lastRefreshTick;
+        }
+
+        internal PetEventSource Source { get; }
+
+        internal long StartedTick { get; }
+
+        internal long LastRefreshTick { get; set; }
     }
 
     private static bool WithinPixels(Vector2 a, Vector2 b, float pixels)
