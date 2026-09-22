@@ -1,12 +1,12 @@
-# PetAnyone
+# PetAnyoneAPI
 
-A shared petting interaction library for Terraria mods built on tModLoader. It is not a mod itself: it has no `Mod` subclass, nothing is auto loaded, and no content is registered just by referencing it. A consuming mod owns every tModLoader hook; this library owns the shared rules, registrations, and visuals.
+A shared petting interaction library for Terraria mods built on tModLoader, displayed as Pet Anyone API. It is not a mod yet: it has no `Mod` subclass, nothing is auto loaded, and no content is registered just by referencing it. It is being prepared to ship as a tModLoader dependency mod. A consuming mod owns every tModLoader hook; this library owns the shared rules, registrations, and visuals.
 
 ## Description / Usage Context
 
-PetAnyone lets a player pet another player or a registered NPC. The player doing the petting is the patter. Targets are pettable players and registered NPCs, reached with a cursor, a chat button, or whatever affordance your mod builds on top.
+PetAnyoneAPI lets a player pet another player or a registered NPC. The player doing the petting is the patter. Targets are pettable players and registered NPCs, reached with a cursor, a chat button, or whatever affordance your mod builds on top.
 
-The library is Terraria oriented on purpose. It is built against the Terraria and tModLoader types, including `Player`, `NPC`, `Item`, `Main`, and `Mod`, and it targets `net8.0`, which is the runtime tModLoader mods use. The deliverable is a plain class library, `PetAnyone.dll`, that a mod references from its `lib` folder.
+The library is Terraria oriented on purpose. It is built against the Terraria and tModLoader types, including `Player`, `NPC`, `Item`, `Main`, and `Mod`, and it targets `net8.0`, which is the runtime tModLoader mods use. Today the deliverable is a plain class library, `PetAnyoneAPI.dll`, that a mod references from its `lib` folder. Once the API ships as a dependency mod, consumers reference it by name instead of shipping the DLL.
 
 What the library owns: registration, rules, and shared visuals.
 
@@ -36,24 +36,37 @@ Public API at a glance:
 ### Requirements
 
 * tModLoader installed locally. The project imports the local tModLoader targets, and it is built with the .NET 8 SDK and C# 12.
-* `BuildMod` is false, so the build produces a library only, with no `.tmod` and no auto loaded content. Build with `dotnet build /p:Configuration=Release`, output at `bin\Release\net8.0\PetAnyone.dll`.
+* `BuildMod` is false for now, so the build produces a library only, with no `.tmod` and no auto loaded content. Build with `dotnet build /p:Configuration=Release`, output at `bin\Release\net8.0\PetAnyoneAPI.dll`. The project file marks the future step of setting `BuildMod` to true when this API is published as a dependency mod.
 * No NuGet packages.
-* Reference it from the consuming mod:
+
+### Two ways to use it
+
+The API can be consumed as a tModLoader dependency mod or as a compiled DLL. The dependency mod is the recommended way.
+
+**Recommended: a tModLoader dependency mod.** When the API ships as a dependency mod, add it to the consuming mod's `build.txt` as a mod dependency instead of a dll dependency:
+
+```
+modReferences = PetAnyoneAPI
+```
+
+The dependency resolves the API at compile time and runtime, so consumer mods use the types directly and receive API updates together with the dependency. `Mod.Call` stays available for cross mod registration.
+
+**Alternative: a compiled DLL, frozen at your version.** Works today. Compile the code into `PetAnyoneAPI.dll`, ship it in your mod's `lib` folder, and reference it instead:
 
 ```xml
-<Reference Include="PetAnyone">
-  <HintPath>lib\PetAnyone.dll</HintPath>
+<Reference Include="PetAnyoneAPI">
+  <HintPath>lib\PetAnyoneAPI.dll</HintPath>
   <Private>False</Private>
 </Reference>
 ```
 
-* Declare the runtime dependency in the consuming mod's `build.txt`:
-
 ```
-dllReferences = PetAnyone
+dllReferences = PetAnyoneAPI
 ```
 
-* Place `PetAnyone.dll` in the consuming mod's `lib` folder before building that mod. This project copies the built DLL into a sibling mod's `lib` folder when that folder already exists, and other consumers copy the DLL themselves.
+Use this path when you plan to customize the codebase and compile your own frozen DLL, so your mod does not follow upstream API changes. You own the version you ship and any updates it needs. The project file contains a commented example MSBuild target for automating the copy into your own mod.
+
+Both ways expose the same API. A mod that ships the DLL does not need the dependency mod installed.
 
 ### Behavior and unload safety
 
@@ -140,31 +153,29 @@ float armAngle = PetService.GetReachAngle(target);
 
 ### Register from another mod with Mod.Call
 
-Host mod:
+The API dispatches cross mod registration through `Mod.Call`. Once it ships as a dependency mod, callers reach it by its internal name:
+
+```csharp
+Mod api = ModLoader.GetMod("PetAnyoneAPI");
+
+if (api is not null)
+{
+    Func<Player, bool> isPettable = player => player.GetModPlayer<MyPlayer>().IsPettable;
+
+    api.Call("RegisterPettableNpc", this, ModContent.NPCType<MyPet>(), new PetNpcDefinition(buttonText: "Pet <3"));
+    api.Call("RegisterPettablePlayer", this, isPettable);
+
+    int version = (int)api.Call("GetVersion")!;
+}
+```
+
+Until then, a host mod that ships the DLL can expose the same dispatcher:
 
 ```csharp
 public override object Call(params object[] args) => PettingApi.Call(args);
 ```
 
-Caller:
-
-```csharp
-// The library has no Mod subclass, so ask the host mod that forwards
-// PettingApi.Call for its own name.
-Mod host = ModLoader.GetMod("PettingHost");
-
-if (host is not null)
-{
-    Func<Player, bool> isPettable = player => player.GetModPlayer<MyPlayer>().IsPettable;
-
-    host.Call("RegisterPettableNpc", this, ModContent.NPCType<MyPet>(), new PetNpcDefinition(buttonText: "Pet <3"));
-    host.Call("RegisterPettablePlayer", this, isPettable);
-
-    int version = (int)host.Call("GetVersion")!;
-}
-```
-
-The host mod must be the mod that overrides `Call` and forwards to `PettingApi.Call`, as shown in the host snippet above. Replace `PettingHost` with that mod's internal name.
+Use that host mod's internal name in `ModLoader.GetMod` instead.
 
 Supported commands: `GetVersion`, `RegisterPettableNpc`, `RegisterPettablePlayer`, `RegisterPettablePlayerRequirement` (also accepted as `RegisterPlayerRequirement`), and `RegisterEvents`.
 
@@ -181,3 +192,9 @@ public sealed class PettingSystem : ModSystem
     }
 }
 ```
+
+## License
+
+Licensed under the Creative Commons Attribution NonCommercial 4.0 International license. See the LICENSE file for the full legal text.
+
+Source repository: https://github.com/POLA-LCS/PetAnyoneAPI

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\tModLoader.targets" />
+  <PropertyGroup>
+    <RootNamespace>PetAnyone</RootNamespace>
+    <!-- Set BuildMod to true when this API is published as a tModLoader dependency mod. -->
+    <BuildMod>false</BuildMod>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <!--
+  Example for consumers: add a target like this to your own .csproj to copy the built dll into your mod lib folder.
+  <Target Name="CopyToConsumerLib" AfterTargets="Build" Condition="Exists('..\YourConsumerMod\lib')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="..\YourConsumerMod\lib" />
+  </Target>
+  -->
+</Project>

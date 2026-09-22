@@ -1,0 +1,2 @@
+This is the Pet Anyone API, it allows you to configure a pet animation with custom triggers for particles, buffs, sounds, etc.
+The Source-Available repo: https://github.com/POLA-LCS/PetAnyoneAPI
