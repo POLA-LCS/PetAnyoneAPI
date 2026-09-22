@@ -15,14 +15,12 @@ public static class PetEvents
     private const string PetStartEventName = "PetStart";
     private const string PetHoldEventName = "PetHold";
     private const string PetEndEventName = "PetEnd";
-    private const string PetHeartEventName = "PetHeart";
     private const string ReachAngleEventName = "ReachAngle";
 
     private static readonly SubscriptionList<Action<CanPetEvent>> canPetHandlers = new();
     private static readonly SubscriptionList<Action<PetStartEvent>> petStartHandlers = new();
     private static readonly SubscriptionList<Action<PetHoldEvent>> petHoldHandlers = new();
     private static readonly SubscriptionList<Action<PetEndEvent>> petEndHandlers = new();
-    private static readonly SubscriptionList<Action<PetHeartEvent>> petHeartHandlers = new();
     private static readonly SubscriptionList<Func<PetTarget, float?>> reachAngleProviders = new();
 
     private static long nextSequence;
@@ -45,10 +43,6 @@ public static class PetEvents
     public static void OnPetEnd(Mod owner, Action<PetEndEvent> handler, PetHandlerOptions? options = null)
         => Add(petEndHandlers, owner, handler, options);
 
-    /// <summary>Adds a heart visual handler. Set <see cref="PetHeartEvent.Handled"/> to suppress the built in heart.</summary>
-    public static void OnPetHeart(Mod owner, Action<PetHeartEvent> handler, PetHandlerOptions? options = null)
-        => Add(petHeartHandlers, owner, handler, options);
-
     /// <summary>Adds a reach angle provider. The first live provider returning a value wins.</summary>
     public static void OnReachAngle(Mod owner, Func<PetTarget, float?> provider, PetHandlerOptions? options = null)
         => Add(reachAngleProviders, owner, provider, options);
@@ -66,7 +60,6 @@ public static class PetEvents
         removed |= RemoveFirst(petStartHandlers.Items, owner, handler);
         removed |= RemoveFirst(petHoldHandlers.Items, owner, handler);
         removed |= RemoveFirst(petEndHandlers.Items, owner, handler);
-        removed |= RemoveFirst(petHeartHandlers.Items, owner, handler);
         removed |= RemoveFirst(reachAngleProviders.Items, owner, handler);
         return removed;
     }
@@ -81,7 +74,6 @@ public static class PetEvents
         removed += RemoveOwner(petStartHandlers.Items, owner);
         removed += RemoveOwner(petHoldHandlers.Items, owner);
         removed += RemoveOwner(petEndHandlers.Items, owner);
-        removed += RemoveOwner(petHeartHandlers.Items, owner);
         removed += RemoveOwner(reachAngleProviders.Items, owner);
         return removed;
     }
@@ -185,14 +177,6 @@ public static class PetEvents
         Dispatch(petEndHandlers.Items, evt, PetEndEventName);
     }
 
-    /// <summary>Dispatches a prepared heart payload. Does not spawn the default heart.</summary>
-    public static void RaisePetHeart(PetHeartEvent evt)
-    {
-        if (evt is null)
-            throw new ArgumentNullException(nameof(evt));
-        Dispatch(petHeartHandlers.Items, evt, PetHeartEventName);
-    }
-
     /// <summary>Kept v1 dispatch. Raises a Manual, Tap start. Prefer <see cref="RaisePetStart(PetStartEvent)"/>.</summary>
     public static void RaisePetStart(PetContext context) => Raise(petStartHandlers, context);
 
@@ -241,7 +225,6 @@ public static class PetEvents
         petStartHandlers.Items.Clear();
         petHoldHandlers.Items.Clear();
         petEndHandlers.Items.Clear();
-        petHeartHandlers.Items.Clear();
         reachAngleProviders.Items.Clear();
         PetLog.Clear();
     }

@@ -5,9 +5,9 @@ namespace PetAnyone;
 
 /// <summary>
 /// Core, mod-agnostic petting logic: range/cooldown constants, target discovery, shared rule
-/// checks and visuals (love hearts, reach angle data) plus the tick bookkeeping used for
-/// cooldowns. Anything that needs a tModLoader hook - input, packets, sound, reach animation -
-/// lives in the consuming mod. Mod-specific effects subscribe through <see cref="PetEvents"/>.
+/// checks (reach angle data) plus the tick bookkeeping used for cooldowns. Anything that needs
+/// a tModLoader hook - input, packets, sound, reach animation, visuals such as hearts - lives
+/// in the consuming mod. Mod-specific effects subscribe through <see cref="PetEvents"/>.
 /// </summary>
 public static class PetService
 {
@@ -19,9 +19,6 @@ public static class PetService
 
     /// <summary>How long the reach arm animation stays up after a pet.</summary>
     public const int PetReachDurationTicks = 30;
-
-    /// <summary>Minimum ticks between love hearts per target, no matter how often a hold refreshes.</summary>
-    public const int PetHeartIntervalTicks = 30;
 
     /// <summary>How often a hold refreshes the pet while right-click is held.</summary>
     public const int PetRefreshTicks = 10;
@@ -35,16 +32,12 @@ public static class PetService
     /// <summary>Default reach arm angle, matching vanilla's petting pose.</summary>
     public const float PetAngleVanilla = 0.37f;
 
-    /// <summary>Gore type of the full bright heart, used by the Love Potion. New in v2.</summary>
-    public const int DefaultHeartGoreType = 331;
-
     /// <summary>Terraria tile size in pixels.</summary>
     private const float TilePixels = 16f;
 
-    /// <summary>Ticks between sweeps of stale cooldown and heart entries.</summary>
+    /// <summary>Ticks between sweeps of stale cooldown entries.</summary>
     private const int TickSweepInterval = 300;
 
-    private static readonly Dictionary<(PetTargetKind Kind, int Index), int> LastHeartTick = new();
     private static readonly Dictionary<int, int> PlayerLastPetTick = new();
     private static readonly Dictionary<int, int> NpcLastPetTick = new();
 
@@ -154,8 +147,8 @@ public static class PetService
     /// <summary>
     /// The recommended apply entry point. A local tap runs the full gate: target, registry, range,
     /// the <c>CanPet</c> event, and the per target cooldown. A local hold, a synced replay, and a
-    /// manual application check the target only. Every path records the session, dispatches
-    /// <see cref="PetStartEvent"/> or <see cref="PetHoldEvent"/>, and plays a heart opportunity.
+    /// manual application check the target only. Every path records the session and dispatches
+    /// <see cref="PetStartEvent"/> or <see cref="PetHoldEvent"/>.
     /// </summary>
     /// <param name="patter">The player applying the pet, or null when the caller has no player.</param>
     /// <param name="target">The player or NPC being petted.</param>
@@ -202,7 +195,7 @@ public static class PetService
         if (!target.IsActive)
             return;
 
-        PlayHeartOpportunity(patter, target, PetEventSource.Synced);
+        PlayPetHeartSynced(target);
         ApplyPetCore(patter, target, bypassCooldown: true);
     }
 
@@ -320,75 +313,18 @@ public static class PetService
     }
 
     /// <summary>
-    /// Throttled heart opportunity for one target. Client only. Raises <see cref="PetHeartEvent"/>
-    /// with a Manual source and then spawns the built in heart when no handler set
-    /// <see cref="PetHeartEvent.Handled"/>.
+    /// Deprecated. The API does not render visuals. Subscribe to <see cref="PetEvents.OnPetStart"/>,
+    /// <see cref="PetEvents.OnPetHold"/>, and <see cref="PetEvents.OnPetEnd"/> and spawn your own
+    /// effects such as heart particles from the consuming mod.
     /// </summary>
+    [Obsolete("The API no longer spawns heart visuals. Use PetEvents.OnPetStart, OnPetHold, and OnPetEnd and render your own effects.")]
     public static void PlayPetHeartSynced(PetTarget target)
     {
-        PlayHeartOpportunity(null, target, PetEventSource.Manual);
-    }
-
-    /// <summary>
-    /// The single heart opportunity for one target: client and target guards, the shared throttle,
-    /// then a <see cref="PetHeartEvent"/> and, when no handler took over, the built in spawn.
-    /// </summary>
-    private static void PlayHeartOpportunity(Player? patter, PetTarget target, PetEventSource source)
-    {
-        if (Main.dedServ || !target.IsActive)
-            return;
-
-        var key = (target.Kind, target.Index);
-        int now = (int)Main.GameUpdateCount;
-        if (LastHeartTick.TryGetValue(key, out int last) && now - last < PetHeartIntervalTicks)
-            return;
-
-        LastHeartTick[key] = now;
-
-        var evt = new PetHeartEvent(new PetContext(patter, target), source);
-        PetEvents.RaisePetHeart(evt);
-        if (!evt.Handled && TrySpawnDefaultHeart(target))
-            evt.DefaultSpawned = true;
-    }
-
-    /// <summary>
-    /// Spawns one Love Potion style full heart above the target immediately, ignoring the shared
-    /// throttle. Client only. Returns false on a dedicated server, when the target does not
-    /// resolve, or when the gore could not be spawned.
-    /// </summary>
-    public static bool TrySpawnDefaultHeart(PetTarget target)
-    {
-        if (Main.dedServ)
-            return false;
-
-        if (!target.TryGetEntity(out Entity? entity) || entity is null)
-            return false;
-
-        Vector2 position = entity.Center
-            + new Vector2(0f, -entity.Hitbox.Height * 0.6f)
-            + Main.rand.NextVector2Circular(6f, 4f);
-
-        int index = Gore.NewGore(
-            entity.GetSource_FromThis(),
-            position,
-            Vector2.Zero,
-            DefaultHeartGoreType,
-            Main.rand.NextFloat(0.55f, 0.85f));
-
-        if (index < 0 || index >= Main.gore.Length)
-            return false;
-
-        Gore heart = Main.gore[index];
-        heart.sticky = false;
-        heart.velocity = new Vector2(Main.rand.NextFloat(-0.25f, 0.25f), Main.rand.NextFloat(-0.9f, -0.5f));
-        heart.rotation = 0f;
-        heart.timeLeft = 70;
-        return true;
     }
 
     /// <summary>
     /// Per tick pump: expires sessions that missed their refresh window and, every 300 ticks,
-    /// sweeps cooldown and heart entries whose entity index went stale or inactive. Safe to call
+    /// sweeps cooldown entries whose entity index went stale or inactive. Safe to call
     /// repeatedly inside one game tick; only the first call does work.
     /// </summary>
     public static void Tick()
@@ -405,19 +341,18 @@ public static class PetService
     }
 
     /// <summary>
-    /// Clears sessions, cooldown ticks, heart throttle ticks, and tick guards without touching
-    /// registrations or event handlers. Call this from a world unload hook. New in v2.
+    /// Clears sessions, cooldown ticks, and tick guards without touching registrations or event
+    /// handlers. Call this from a world unload hook. New in v2.
     /// </summary>
     public static void ResetWorldState()
     {
         Sessions.Clear();
-        LastHeartTick.Clear();
         PlayerLastPetTick.Clear();
         NpcLastPetTick.Clear();
         LastProcessedTick = long.MinValue;
     }
 
-    /// <summary>Drops all session, cooldown, and heart state; call this when the consuming mod unloads.</summary>
+    /// <summary>Drops all session and cooldown state; call this when the consuming mod unloads.</summary>
     public static void Clear()
     {
         ResetWorldState();
@@ -454,7 +389,6 @@ public static class PetService
         Sessions[key] = new SessionState(source, now, now);
         PetEvents.RaisePetStart(new PetStartEvent(context, source, PetApplyMode.Tap));
 
-        PlayHeartOpportunity(patter, target, source);
         return PetApplyResult.Success;
     }
 
@@ -481,7 +415,6 @@ public static class PetService
             PetEvents.RaisePetStart(new PetStartEvent(context, source, mode));
         }
 
-        PlayHeartOpportunity(patter, target, source);
         return PetApplyResult.Success;
     }
 
@@ -585,17 +518,6 @@ public static class PetService
 
         for (int i = 0; i < staleNpcIndices.Count; i++)
             NpcLastPetTick.Remove(staleNpcIndices[i]);
-
-        var staleHeartKeys = new List<(PetTargetKind Kind, int Index)>();
-        foreach ((PetTargetKind kind, int index) in LastHeartTick.Keys)
-        {
-            bool active = kind == PetTargetKind.Player ? IsPlayerIndexActive(index) : IsNpcIndexActive(index);
-            if (!active)
-                staleHeartKeys.Add((kind, index));
-        }
-
-        for (int i = 0; i < staleHeartKeys.Count; i++)
-            LastHeartTick.Remove(staleHeartKeys[i]);
     }
 
     private static bool IsPlayerIndexActive(int index)
