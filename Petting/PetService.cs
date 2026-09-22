@@ -497,6 +497,24 @@ public static class PetService
         }
     }
 
+    /// <summary>
+    /// Closes every active session with the given reason, using each session's stored source.
+    /// The lifecycle system calls this on world unload. Available in every build.
+    /// </summary>
+    internal static void EndAllSessions(PetEndReason reason)
+    {
+        if (Sessions.Count == 0)
+            return;
+
+        var snapshot = new List<KeyValuePair<SessionKey, SessionState>>(Sessions);
+        Sessions.Clear();
+        for (int i = 0; i < snapshot.Count; i++)
+        {
+            KeyValuePair<SessionKey, SessionState> pair = snapshot[i];
+            RaiseSessionEnd(pair.Key, reason, pair.Value.Source);
+        }
+    }
+
     private static void SweepStaleTickState()
     {
         var stalePlayerIndices = new List<int>();

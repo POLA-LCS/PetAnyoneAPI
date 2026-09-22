@@ -66,6 +66,17 @@ internal static class PetLog
             return;
         }
 
+#if PETANYONE_MOD_BUILD
+        if (PetAnyoneAPI.PetAnyoneMod.Instance is Mod self)
+        {
+            if (isError)
+                self.Logger.Error(message);
+            else
+                self.Logger.Info(message);
+            return;
+        }
+#endif
+
         if (ModLoader.TryGetMod(ApiModName, out Mod apiMod))
         {
             if (isError)

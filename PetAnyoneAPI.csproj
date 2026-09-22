@@ -9,6 +9,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <!-- Defines the conditional lifecycle compile only when this project is built as a mod.
+       This group must stay after the BuildMod false assignment above. -->
+  <PropertyGroup Condition="'$(BuildMod)' == 'true'">
+    <DefineConstants>$(DefineConstants);PETANYONE_MOD_BUILD</DefineConstants>
+  </PropertyGroup>
   <!--
   Example for consumers: add a target like this to your own .csproj to copy the built dll into your mod lib folder.
   <Target Name="CopyToConsumerLib" AfterTargets="Build" Condition="Exists('..\YourConsumerMod\lib')">
