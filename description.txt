@@ -1,1 +1,1 @@
-This is an API, so don't worry about it. Do not enable it alone, it does nothing ingame and just provides tools for mod developers to enable petting animations.
+This is an API mod. Enable it alongside a mod that uses it. It adds no gameplay on its own and provides petting rules, hooks, and session tracking for mod developers. Visuals such as hearts belong to the mods that use it.
