@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>Where a pet application came from.</summary>

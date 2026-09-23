@@ -1,3 +1,7 @@
+using System;
+
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>

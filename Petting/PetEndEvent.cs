@@ -1,5 +1,7 @@
 using Terraria.ModLoader;
 
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>Post event: an active session closed. Every start is paired with exactly one end.</summary>

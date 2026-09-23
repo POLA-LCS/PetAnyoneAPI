@@ -1,5 +1,9 @@
+using System;
+using System.Collections.Generic;
 using Terraria;
 using Terraria.ModLoader;
+
+#nullable enable
 
 namespace PetAnyone;
 
@@ -84,7 +88,7 @@ internal static class PetLog
             return;
         }
 
-#if PETANYONE_MOD_BUILD
+#if !PETANYONE_DLL_BUILD
         if (PetAnyoneAPI.PetAnyoneMod.Instance is Mod self)
         {
             if (isError)

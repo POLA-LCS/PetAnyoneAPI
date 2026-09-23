@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>Why an active pet session ended.</summary>

@@ -1,5 +1,7 @@
 using Terraria.ModLoader;
 
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>Pre event: raised before a local pet is accepted. Set Cancel to veto.</summary>

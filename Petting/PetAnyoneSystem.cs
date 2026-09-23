@@ -1,6 +1,8 @@
-#if PETANYONE_MOD_BUILD
+#if !PETANYONE_DLL_BUILD
 using PetAnyone;
 using Terraria.ModLoader;
+
+#nullable enable
 
 namespace PetAnyoneAPI;
 

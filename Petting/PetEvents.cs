@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using Terraria.ModLoader;
+
+#nullable enable
 
 namespace PetAnyone;
 

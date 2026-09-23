@@ -1,5 +1,7 @@
 using Terraria;
 
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>

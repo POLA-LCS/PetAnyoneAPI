@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>How an application is intended: one tap or one hold refresh.</summary>

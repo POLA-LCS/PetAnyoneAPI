@@ -1,6 +1,9 @@
+using System;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Xna.Framework;
 using Terraria;
+
+#nullable enable
 
 namespace PetAnyone;
 

@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>Machine readable outcome code for TryApplyPet.</summary>

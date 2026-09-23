@@ -1,6 +1,10 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using Terraria;
 using Terraria.ModLoader;
+
+#nullable enable
 
 namespace PetAnyone;
 

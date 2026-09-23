@@ -1,5 +1,7 @@
 using Terraria.ModLoader;
 
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>Post event: an open session received another hold refresh.</summary>

@@ -1,5 +1,7 @@
 using Terraria.ModLoader;
 
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>Post event: a pet session opened, either a tap or the first hold application.</summary>

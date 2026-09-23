@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>Ordering weight shared by event handlers and registry entries. Lower runs first.</summary>

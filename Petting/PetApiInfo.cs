@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace PetAnyone;
 
 /// <summary>Immutable API identity returned by Call("GetApi") and PettingApi.Info.</summary>
