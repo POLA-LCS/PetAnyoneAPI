@@ -1,2 +1,4 @@
+[h1]Pet Anyone API | Now you can pet anyone! as... the name... says...[/h1]
+
 The Pet Anyone API lets modders add petting interactions: registration rules, tap and hold sessions, hook events, and network friendly session state. It adds no content by itself and does no visuals. Hearts, sounds, and animations stay in the mods that use it.
 The Source-Available repo: https://github.com/POLA-LCS/PetAnyoneAPI
