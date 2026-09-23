@@ -6,7 +6,7 @@ namespace PetAnyone;
 /// <summary>
 /// Core, mod-agnostic petting logic: range/cooldown constants, target discovery, shared rule
 /// checks (reach angle data) plus the tick bookkeeping used for cooldowns. Anything that needs
-/// a tModLoader hook - input, packets, sound, reach animation, visuals such as hearts - lives
+/// a tModLoader hook (input, packets, sound, reach animation, visuals such as hearts) lives
 /// in the consuming mod. Mod-specific effects subscribe through <see cref="PetEvents"/>.
 /// </summary>
 public static class PetService
@@ -272,7 +272,7 @@ public static class PetService
         return true;
     }
 
-    /// <summary>Angle used for the reach arm; consumers can override it per target.</summary>
+    /// <summary>Angle used for the reach arm. Consumers can override it per target.</summary>
     public static float GetReachAngle(PetTarget target)
     {
         return PetEvents.TryGetReachAngle(target, out float angle) ? angle : PetAngleVanilla;
@@ -325,7 +325,7 @@ public static class PetService
     /// <summary>
     /// Per tick pump: expires sessions that missed their refresh window and, every 300 ticks,
     /// sweeps cooldown entries whose entity index went stale or inactive. Safe to call
-    /// repeatedly inside one game tick; only the first call does work.
+    /// repeatedly inside one game tick. Only the first call does work.
     /// </summary>
     public static void Tick()
     {
@@ -352,7 +352,7 @@ public static class PetService
         LastProcessedTick = long.MinValue;
     }
 
-    /// <summary>Drops all session and cooldown state; call this when the consuming mod unloads.</summary>
+    /// <summary>Drops all session and cooldown state. Call this when the consuming mod unloads.</summary>
     public static void Clear()
     {
         ResetWorldState();

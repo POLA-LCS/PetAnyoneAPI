@@ -55,7 +55,7 @@ public static class PettingApi
         return true;
     }
 
-    /// <summary>Registers a rule that can veto petting a player; players are pettable by default.</summary>
+    /// <summary>Registers a rule that can veto petting a player. Players are pettable by default.</summary>
     public static bool RegisterPettablePlayer(Mod owner, Func<Player, bool> isPettable)
     {
         PetRegistry.RegisterPlayerRule(owner, isPettable);

@@ -157,7 +157,7 @@ public static class PetRegistry
     }
 
     /// <summary>
-    /// Whether the NPC matches a registered rule or type; also outputs its definition. Rules are
+    /// Whether the NPC matches a registered rule or type. Also outputs its definition. Rules are
     /// resolved before type layers, and definitions never merge across entries.
     /// </summary>
     public static bool TryGetNpcDefinition(NPC npc, [NotNullWhen(true)] out PetNpcDefinition? definition)
@@ -209,7 +209,7 @@ public static class PetRegistry
 
     /// <summary>
     /// Registers a rule that can veto petting a player. Players are pettable by default, so a rule
-    /// only matters when it returns false; use this to exclude special players. Player lists keep
+    /// only matters when it returns false. Use this to exclude special players. Player lists keep
     /// v1 registration order, and a rule whose predicate throws vetoes.
     /// </summary>
     public static void RegisterPlayerRule(Mod owner, Func<Player, bool> isPettable)
@@ -239,7 +239,7 @@ public static class PetRegistry
     /// <summary>
     /// Registers an allow-list requirement: a player is pettable only when every requirement
     /// returns true. With no requirements, all players are pettable by default. This is additive
-    /// with the veto rules in <see cref="RegisterPlayerRule"/>; both must pass. Requirements are
+    /// with the veto rules in <see cref="RegisterPlayerRule"/>. Both must pass. Requirements are
     /// checked first, a requirement whose predicate throws fails, and evaluation order stays v1
     /// registration order.
     /// </summary>
@@ -267,7 +267,7 @@ public static class PetRegistry
         return false;
     }
 
-    /// <summary>Players are pettable by default; any registered rule returning false vetoes and every requirement must pass.</summary>
+    /// <summary>Players are pettable by default. Any registered rule returning false vetoes and every requirement must pass.</summary>
     public static bool IsPlayerPettable(Player player)
     {
         if (player is null || !player.active || player.dead)
@@ -302,7 +302,7 @@ public static class PetRegistry
     }
 
     /// <summary>
-    /// Registers an "item allows petting" rule. The empty hand always allows petting; a held item
+    /// Registers an "item allows petting" rule. The empty hand always allows petting. A held item
     /// only does when a rule says so (for example a clicker registered by a consumer mod). Item
     /// rules are ORed in v1 registration order, and a rule whose predicate throws does not allow.
     /// </summary>
@@ -404,7 +404,7 @@ public static class PetRegistry
         return removed;
     }
 
-    /// <summary>Drops every registration and resets the logger throttle; call this when the consuming mod unloads.</summary>
+    /// <summary>Drops every registration and resets the logger throttle. Call this when the consuming mod unloads.</summary>
     public static void Clear()
     {
         npcDefinitions.Clear();

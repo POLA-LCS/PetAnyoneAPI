@@ -43,7 +43,7 @@ public readonly struct PetTarget(PetTargetKind kind, int index) : IEquatable<Pet
 
     public Rectangle Hitbox => AsEntity?.Hitbox ?? Rectangle.Empty;
 
-    /// <summary>Player name or NPC given/type name; empty when the target is stale.</summary>
+    /// <summary>Player name or NPC given/type name. Empty when the target is stale.</summary>
     public string DisplayName => Kind == PetTargetKind.Player
         ? (TryGetPlayer(out Player? player) ? player.name : string.Empty)
         : (TryGetNpc(out NPC? npc) ? npc.GivenOrTypeName : string.Empty);
