@@ -2,15 +2,15 @@
   <Import Project="..\tModLoader.targets" />
   <PropertyGroup>
     <RootNamespace>PetAnyone</RootNamespace>
-    <!-- Do not change this if you are using it as a DLL reference -->
-    <BuildMod>false</BuildMod>
+    <!-- True packages the dependency mod. Set to false for a library only DLL build. -->
+    <BuildMod>true</BuildMod>
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>12.0</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <!-- Defines the conditional lifecycle compile only when this project is built as a mod.
-       This group must stay after the BuildMod false assignment above. -->
+       This group must stay after the BuildMod assignment above. -->
   <PropertyGroup Condition="'$(BuildMod)' == 'true'">
     <DefineConstants>$(DefineConstants);PETANYONE_MOD_BUILD</DefineConstants>
   </PropertyGroup>
