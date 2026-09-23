@@ -25,20 +25,21 @@ What the consuming mod owns:
 
 ## Public API at a glance
 
-* `PetTargetKind` and `PetTarget`: which kind of entity a target points at, and a copyable handle for a player or an NPC by index. Members: `None`, `Kind`, `Index`, `IsPlayer`, `IsNpc`, `IsValid`, `IsActive`, `IsAlive`, `AsEntity`, `Center`, `Hitbox`, `DisplayName`, `TryGetPlayer`, `TryGetNpc`, `TryGetEntity`, `FromPlayer`, `FromNpc`.
+* `PetTargetKind` and `PetTarget`: which kind of entity a target points at, and a copyable handle for a player or an NPC by index. Members: `None`, `Kind`, `Index`, `IsPlayer`, `IsNpc`, `IsValid`, `IsActive`, `IsAlive`, `AsEntity`, `Center`, `Hitbox`, `DisplayName`, `TryGetPlayer`, `TryGetNpc`, `TryGetEntity`, `FromPlayer`, `FromNpc`, plus the standard equality members and `ToString`.
 * `PetContext`: the payload base data for every hook. Members: `Patter`, `Target`, `IsValid`.
 * `PetNpcDefinition`: per NPC flags for consumers. Members: `Default`, `DisplayName`, `AllowWorldPet`, `ShowChatButton`, `ButtonText`.
 * `PetEventCallbacks`: bundle for registering several hooks at once. Members: `CanPet`, `OnPetStart`, `OnPetHold`, `OnPetEnd`.
 * `PetPriority`: dispatch order for handlers and registry entries. `High`, `Normal`, `Low`.
 * `PetHandlerOptions`: subscription options. Members: `Default`, `Priority`, `TargetKind`, `Filter`.
 * Event payloads: `PetEvent` base with `Context`, `Source`, `Issuer`, `Tick`, `Patter`, `Target`, `IsLocal`, `IsSynced`, `IsValid`. Subclasses: `CanPetEvent` with `Cancel` and `RejectionReason`, `PetStartEvent` with `Mode` and `IsHoldStart`, `PetHoldEvent`, `PetEndEvent` with `Reason`, all sealed.
-* `PetApplyResult` and `PetApplyCode`: machine readable outcome of `TryApplyPet`.
+* `PetApplyResult` and `PetApplyCode`: machine readable outcome of `TryApplyPet`. `PetApplyResult` members: `Applied`, `Code`, `Success`, `IsApplied`, `IsRejected`, `Reject`, `ToString`. Codes: `Applied`, `RejectedTarget`, `RejectedRegistry`, `RejectedRange`, `RejectedCancelled`, `RejectedCooldown`, `RejectedUnsupported`.
 * `PetEventSource`: `Local`, `Synced`, `Manual`. `PetApplyMode`: `Tap`, `Hold`. `PetEndReason`: `Released`, `Timeout`, `TargetLost`, `Replaced`, `WorldUnload`, `Manual`.
-* `PetSessionInfo`: readonly snapshot of an active session. `PetApiInfo`: version negotiation object.
+* `PetSessionInfo`: readonly snapshot of an active session. Members: `Target`, `Patter`, `Source`, `StartedTick`, `LastRefreshTick`. `PetApiInfo`: version negotiation object. Members: `Major`, `Minor`, `Patch`, `VersionString`, `ModName`.
 * `PetRegistry`: registration and lookup. Members: `RegisterNpc` (with a priority overload), `UnregisterNpc`, `RegisterNpcRule` (with a priority overload), `UnregisterNpcRule`, `TryGetNpcDefinition`, `IsNpcPettable`, `RegisterPlayerRule`, `UnregisterPlayerRule`, `RegisterPlayerRequirement`, `UnregisterPlayerRequirement`, `IsPlayerPettable`, `RegisterPetHandItem`, `UnregisterPetHandItem`, `AllowsPettingItem`, `IsOwnerLoaded`, `ClearOwner`, `Clear`.
 * `PetEvents`: hooks and dispatch. Members: `OnCanPet`, `OnPetStart`, `OnPetHold`, `OnPetEnd`, `OnReachAngle`, `Unsubscribe`, `ClearOwner`, the obsolete `Register*` adapters, `RegisterCallbacks`, `CanPet`, `RaiseCanPet`, `RaisePetStart`, `RaisePetHold`, `RaisePetEnd`, `TryGetReachAngle`, `Clear`.
 * `PetService`: shared rules and sessions. Members: `PetRangeTiles`, `PetCooldownTicks`, `PetReachDurationTicks`, `PetRefreshTicks`, `PetHoldTimeoutTicks`, `PetAngleMorphed`, `PetAngleVanilla`, `IsPetHand`, `FindTargetUnderCursor`, `TryFindTargetUnderCursor`, `CanPet`, `TryApplyPet`, `EndPet`, `IsPetActive` (two overloads), `TryGetActiveSession`, `GetReachAngle`, `GetLastPetTick`, `SetLastPetTick`, `GetTargetLastPetTick`, `SetTargetLastPetTick`, `Tick`, `ResetWorldState`, `Clear`, plus obsolete `ApplyPetCore`, `HandleSyncedPet`, and `PlayPetHeartSynced`.
 * `PettingApi`: consumer entry point. Members: `ApiVersion`, `ApiMinorVersion`, `ApiVersionString`, `ModName`, `Info`, `RegisterPettableNpc` (type and predicate overloads, with priority), `RegisterPettablePlayer`, `RegisterPettablePlayerRequirement`, `RegisterPetHandItem`, `RegisterEvents`, `Call`.
+* `PetAnyoneMod` and `PetAnyoneSystem` (namespace `PetAnyoneAPI`, mod builds only): the dependency mod lifecycle. They clear registries, handlers, and state on unload, end sessions and reset state on world transitions, and pump `PetService.Tick` every game update.
 
 ### Hook model
 
@@ -52,7 +53,7 @@ What the consuming mod owns:
 
 * Ordering is `PetPriority` ascending (High, then Normal, then Low), then registration order inside one priority. `CanPetEvent` short circuits on the first cancel. Every other hook runs all handlers.
 * `PetHandlerOptions` can restrict a handler to a target kind or a filter predicate. Throwing filters and handlers are logged through the owner mod and never abort the remaining handlers.
-* `Unsubscribe` removes one matching handler. `ClearOwner` removes everything a mod owns and returns the count.
+* `Unsubscribe` removes one matching handler by delegate equality. Handlers registered through the obsolete `Register*` adapters are stored as wrapper delegates, so `Unsubscribe` cannot match them. Use `ClearOwner` or `Clear` for those. `ClearOwner` removes everything a mod owns and returns the count.
 
 ### Sessions
 
@@ -257,7 +258,7 @@ Command table, arguments after the command name:
 | `GetApi` | none | `PetApiInfo` |
 | `RegisterPettableNpc` | `2, owner, npcType or Func<NPC,bool>, [definition], [priority]` | `bool` |
 | `RegisterPettablePlayer` | `2, owner, Func<Player,bool>` | `bool` |
-| `RegisterPettablePlayerRequirement` | `2, owner, Func<Player,bool>` | `bool` |
+| `RegisterPettablePlayerRequirement` (alias `RegisterPlayerRequirement`) | `2, owner, Func<Player,bool>` | `bool` |
 | `RegisterPetHandItem` | `2, owner, Func<Item,bool>` | `bool` |
 | `RegisterReachAngle` | `2, owner, Func<PetTarget,float?>, [options]` | `bool` |
 | `Subscribe` | `2, owner, eventName, handler, [options]` | `bool` |
@@ -265,7 +266,7 @@ Command table, arguments after the command name:
 | `UnregisterPettableNpc` | `2, owner, npcType` | `bool` |
 | `UnregisterPettableNpcRule` | `2, owner, Func<NPC,bool>` | `bool` |
 | `UnregisterPettablePlayer` | `2, owner, Func<Player,bool>` | `bool` |
-| `UnregisterPettablePlayerRequirement` | `2, owner, Func<Player,bool>` | `bool` |
+| `UnregisterPettablePlayerRequirement` (alias `UnregisterPlayerRequirement`) | `2, owner, Func<Player,bool>` | `bool` |
 | `UnregisterPetHandItem` | `2, owner, Func<Item,bool>` | `bool` |
 | `UnregisterReachAngle` | `2, owner, Func<PetTarget,float?>` | `bool` |
 | `ClearOwner` | `2, owner` | `int` removed count |
@@ -273,6 +274,7 @@ Command table, arguments after the command name:
 | `ApplyPet` | `2, patter, target, [mode], [source]` | `PetApplyResult` |
 | `EndPet` | `2, patter, target, [reason], [source]` | `bool` |
 | `IsPetActive` | `2, target` or `2, patter, target` | `bool` |
+| `RegisterEvents` (v1 shape) | `owner, PetEventCallbacks` | `bool` |
 
 Notes for `Mod.Call` users:
 
@@ -280,6 +282,7 @@ Notes for `Mod.Call` users:
 * Enum values: `PetApplyMode` Tap 0, Hold 1. `PetEventSource` Local 0, Synced 1, Manual 2. `PetEndReason` Released 0, Timeout 1, TargetLost 2, Replaced 3, WorldUnload 4, Manual 5. `PetPriority` High 0, Normal 100, Low 200.
 * `Subscribe` accepts the event names `CanPet`, `PetStart`, `PetHold`, `PetEnd`, and `ReachAngle`. `CanPet` takes `Action<CanPetEvent>` or the legacy `Func<PetContext, bool>`.
 * Unknown commands return null. Malformed known commands throw `ArgumentException` naming the command and the expected schema. Unknown events and too new API versions throw too.
+* v1 shapes without the version integer are still accepted for `GetVersion`, `RegisterPettableNpc`, `RegisterPettablePlayer`, `RegisterPettablePlayerRequirement` (alias `RegisterPlayerRequirement`), and `RegisterEvents`.
 * Delegate arguments need a compile time reference to the API assembly, because delegate type identity comes from that assembly.
 
 ### Clean up on unload
