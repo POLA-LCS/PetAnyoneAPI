@@ -1,8 +1,8 @@
 # PetAnyoneAPI
 
-A shared petting interaction library for Terraria mods built on tModLoader, displayed as Pet Anyone API. It ships as a dependency mod: consumer mods add `modReferences = PetAnyoneAPI` and use the typed API directly, or call in through `Mod.Call`. The API owns registration rules, session state, and hook dispatch. Consuming mods own every tModLoader hook: input, packets, sound, animation, and visuals such as heart particles.
-
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/F6Y820D0DI)
+
+A shared petting interaction library for Terraria mods built on tModLoader, displayed as Pet Anyone API. It ships as a dependency mod: consumer mods add `modReferences = PetAnyoneAPI` and use the typed API directly, or call in through `Mod.Call`. The API owns registration rules, session state, and hook dispatch. Consuming mods own every tModLoader hook: input, packets, sound, animation, and visuals such as heart particles.
 
 ## Description / Usage Context
 
