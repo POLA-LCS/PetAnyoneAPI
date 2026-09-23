@@ -55,6 +55,24 @@ internal static class PetLog
         throttles.Clear();
     }
 
+    /// <summary>Drops the throttle entries for one owner, called when a mod clears its registrations.</summary>
+    internal static void ClearOwner(Mod owner)
+    {
+        if (owner is null)
+            return;
+
+        string ownerName = owner.Name;
+        var stale = new List<(string Owner, string Context)>();
+        foreach ((string ownerKey, string context) in throttles.Keys)
+        {
+            if (ownerKey == ownerName)
+                stale.Add((ownerKey, context));
+        }
+
+        for (int i = 0; i < stale.Count; i++)
+            throttles.Remove(stale[i]);
+    }
+
     private static void Write(Mod? owner, string message, bool isError)
     {
         if (owner is not null && PetRegistry.IsOwnerLoaded(owner))

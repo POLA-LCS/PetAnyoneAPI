@@ -75,6 +75,7 @@ public static class PetEvents
         removed += RemoveOwner(petHoldHandlers.Items, owner);
         removed += RemoveOwner(petEndHandlers.Items, owner);
         removed += RemoveOwner(reachAngleProviders.Items, owner);
+        PetLog.ClearOwner(owner);
         return removed;
     }
 

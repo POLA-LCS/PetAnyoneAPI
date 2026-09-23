@@ -401,6 +401,7 @@ public static class PetRegistry
         removed += RemoveOwned(playerRequirements, owner, static entry => entry.Owner);
         removed += RemoveOwned(petHandItems, owner, static entry => entry.Owner);
 
+        PetLog.ClearOwner(owner);
         return removed;
     }
 
